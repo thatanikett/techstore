@@ -32,75 +32,7 @@ const landingTestimonials = [
   },
 ];
 
-const formatIsoTime = (value) => {
-  if (!value) return "Waiting for request";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleString();
-};
-
-function LandingPage({ onExplore, onCheckStatus, deployInfo, lastRequestInfo, loading }) {
-  const [activeTrace, setActiveTrace] = useState("backend");
-
-  const machineForNode = (nodeName) => {
-    if (!nodeName) return "Unknown PVE";
-    const mapping = [
-      { host: "PVE1", nodes: ["vm1", "vm2"] },
-      { host: "PVE2", nodes: ["vm3", "vm4"] },
-      { host: "PVE3", nodes: ["vm5", "vm6"] },
-    ];
-    const normalized = nodeName.toLowerCase();
-    const match = mapping.find((entry) =>
-      entry.nodes.some((id) => normalized.includes(id))
-    );
-    return match ? match.host : "Unknown PVE";
-  };
-
-  const tracePresets = {
-    backend: {
-      label: "Backend",
-      serviceName: "backend",
-      info: lastRequestInfo,
-    },
-    frontend: {
-      label: "Frontend",
-      serviceName: "frontend",
-      info: deployInfo
-        ? {
-            ...deployInfo,
-            serviceName: "frontend",
-            podName: "frontend-pod",
-          }
-        : null,
-    },
-    database: {
-      label: "Database",
-      serviceName: "postgres",
-      info: deployInfo
-        ? {
-            ...deployInfo,
-            serviceName: "postgres",
-            podName: "postgres-stateful-pod",
-          }
-        : null,
-    },
-  };
-
-  const activeTraceConfig = tracePresets[activeTrace];
-  const activeTraceInfo = activeTraceConfig.info;
-  const requestDetails = [
-    ["Time", formatIsoTime(activeTraceInfo?.receivedAt)],
-    ["Runtime mode", activeTraceInfo?.runtimeMode || "Pending"],
-    ["Service", activeTraceInfo?.serviceName || activeTraceConfig.serviceName],
-    ["K3s Node", activeTraceInfo?.nodeName || "Pending"],
-    ["Machine", machineForNode(activeTraceInfo?.nodeName)],
-    ["Pod", activeTraceInfo?.podName || "Pending"],
-    ["Pod IP", activeTraceInfo?.podIp || "Pending"],
-    ["Client IP", activeTraceInfo?.clientIp || "Pending"],
-  ];
-
+function LandingPage({ onExplore }) {
   return (
     <div className="landing-page">
       <div className="landing-noise" />
@@ -113,7 +45,11 @@ function LandingPage({ onExplore, onCheckStatus, deployInfo, lastRequestInfo, lo
           <button type="button" className="landing-nav-link">
             Home
           </button>
-          <button type="button" className="landing-nav-link" onClick={onExplore}>
+          <button
+            type="button"
+            className="landing-nav-link"
+            onClick={onExplore}
+          >
             Catalog
           </button>
           <button type="button" className="landing-nav-link">
@@ -121,14 +57,6 @@ function LandingPage({ onExplore, onCheckStatus, deployInfo, lastRequestInfo, lo
           </button>
         </nav>
         <div className="landing-nav-actions">
-          <button
-            className="nav-status-button"
-            onClick={onCheckStatus}
-            type="button"
-          >
-            <span className={`status-dot ${deployInfo ? "is-live" : ""}`} />
-            {loading ? "Checking..." : "Refresh trace"}
-          </button>
           <button className="nav-cta" onClick={onExplore}>
             Enter store
           </button>
@@ -165,7 +93,7 @@ function LandingPage({ onExplore, onCheckStatus, deployInfo, lastRequestInfo, lo
           <div className="landing-hero-copy landing-hero-copy-centered">
             <h1 className="landing-title">
               Shop the
-              <br/>
+              <br />
               gear that
               <br />
               upgrades
@@ -174,7 +102,7 @@ function LandingPage({ onExplore, onCheckStatus, deployInfo, lastRequestInfo, lo
             </h1>
             <p className="landing-subtitle">
               A more cinematic storefront for desktops, displays, and creative
-              gear, staged with depth, motion, and collectible energy.
+              gear.
             </p>
             <div className="landing-actions">
               <div className="catalog-invite">
@@ -213,16 +141,29 @@ function LandingPage({ onExplore, onCheckStatus, deployInfo, lastRequestInfo, lo
         </div>
       </section>
 
-      <section className="landing-section landing-section-proof" id="collection">
+      <section
+        className="landing-section landing-section-proof"
+        id="collection"
+      >
         <div className="section-intro">
           <p className="section-label">Testimonials</p>
-          <h2>People remember the atmosphere first, then how easy it was to buy.</h2>
+          <h2>
+            People remember the atmosphere first, then how easy it was to buy.
+          </h2>
         </div>
         <div className="proof-layout">
           <div className="proof-visual">
             <div className="proof-badge">Trusted setups</div>
-            <img src="/image copy.png" alt="Desktop monitor" className="proof-monitor" />
-            <img src="/image copy 4.png" alt="Open chassis system" className="proof-chassis" />
+            <img
+              src="/image copy.png"
+              alt="Desktop monitor"
+              className="proof-monitor"
+            />
+            <img
+              src="/image copy 4.png"
+              alt="Open chassis system"
+              className="proof-chassis"
+            />
           </div>
           <div className="testimonial-stack">
             {landingTestimonials.map((item) => (
@@ -237,43 +178,179 @@ function LandingPage({ onExplore, onCheckStatus, deployInfo, lastRequestInfo, lo
           </div>
         </div>
       </section>
+    </div>
+  );
+}
 
-      <section className="landing-section landing-section-cta" id="cta">
-        <p className="section-label">Last Request Trace</p>
-        <h2>The latest service response shows which k3s node and pod handled the request.</h2>
-        <p className="cta-copy">
-          Toggle the service to inspect backend, frontend, and database request
-          traces with pod, node, machine, and client metadata.
-        </p>
-        <div className="trace-toggle-group" role="tablist" aria-label="Trace service switcher">
-          {Object.entries(tracePresets).map(([key, config]) => (
-            <button
-              key={key}
-              type="button"
-              className={`trace-toggle ${activeTrace === key ? "is-active" : ""}`}
-              onClick={() => setActiveTrace(key)}
+function VersionBanner({ version }) {
+  if (!version) return null;
+  const isV1 = version.toLowerCase() === "v1";
+  const bg = isV1 ? "#2563eb" : "#10b981"; // Blue for V1, Green for V2
+
+  return (
+    <div
+      style={{
+        backgroundColor: bg,
+        color: "white",
+        padding: "8px",
+        textAlign: "center",
+        fontWeight: "bold",
+      }}
+    >
+      Running Version: {version}
+    </div>
+  );
+}
+
+function StatusWidget({ info }) {
+  if (!info) return null;
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: "20px",
+        right: "20px",
+        backgroundColor: "rgba(0,0,0,0.8)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        padding: "15px",
+        borderRadius: "8px",
+        color: "white",
+        zIndex: 9999,
+        fontFamily: "monospace",
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            backgroundColor: "#10b981",
+            boxShadow: "0 0 10px #10b981",
+          }}
+        />
+        <span style={{ fontWeight: "bold" }}>Live Traffic Shift Monitor</span>
+      </div>
+      <div>
+        <strong>Hostname:</strong> {info.hostname}
+      </div>
+      <div>
+        <strong>Version:</strong> {info.version}
+      </div>
+    </div>
+  );
+}
+
+function CartModal({ cart, onClose, onCheckout }) {
+  const [paymentMethod, setPaymentMethod] = useState("online");
+  const total = cart.reduce((add, item) => add + Number(item.price), 0);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        backgroundColor: "rgba(0,0,0,0.5)",
+        zIndex: 9999,
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+      }}
+    >
+      <div
+        style={{
+          backgroundColor: "var(--card-bg)",
+          padding: "20px",
+          borderRadius: "12px",
+          width: "90%",
+          maxWidth: "400px",
+          color: "var(--text-main)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        <h2>Your Cart</h2>
+        {cart.length === 0 ? (
+          <p>Cart is empty</p>
+        ) : (
+          <div style={{ margin: "20px 0" }}>
+            {cart.map((item, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: "8px",
+                }}
+              >
+                <span>{item.name}</span>
+                <span>${item.price}</span>
+              </div>
+            ))}
+            <hr style={{ borderColor: "rgba(255,255,255,0.1)" }} />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontWeight: "bold",
+                marginTop: "8px",
+              }}
             >
-              {config.label}
-            </button>
-          ))}
-        </div>
-        <div className="request-trace-panel">
-          {requestDetails.map(([label, value]) => (
-            <div className="request-trace-row" key={label}>
-              <span>{label}</span>
-              <strong>{value}</strong>
+              <span>Total</span>
+              <span>${total.toFixed(2)}</span>
             </div>
-          ))}
-        </div>
-        <div className="landing-cta-actions">
-          <button className="cta-button" onClick={onCheckStatus}>
-            Refresh trace
+          </div>
+        )}
+
+        {cart.length > 0 && (
+          <div style={{ marginBottom: "20px" }}>
+            <label style={{ display: "block", marginBottom: "8px" }}>
+              Payment Method:
+            </label>
+            <div style={{ display: "flex", gap: "16px" }}>
+              <label>
+                <input
+                  type="radio"
+                  value="online"
+                  checked={paymentMethod === "online"}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                />{" "}
+                Online
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  value="cod"
+                  checked={paymentMethod === "cod"}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                />{" "}
+                Cash on Delivery (COD)
+              </label>
+            </div>
+          </div>
+        )}
+
+        <div
+          style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}
+        >
+          <button className="secondary-cta-button" onClick={onClose}>
+            Close
           </button>
-          <button className="secondary-cta-button" onClick={onExplore}>
-            Open catalog
-          </button>
+          {cart.length > 0 && (
+            <button
+              className="cta-button"
+              onClick={() => onCheckout(paymentMethod)}
+            >
+              Checkout
+            </button>
+          )}
         </div>
-      </section>
+      </div>
     </div>
   );
 }
@@ -281,22 +358,31 @@ function LandingPage({ onExplore, onCheckStatus, deployInfo, lastRequestInfo, lo
 function App() {
   const [view, setView] = useState(getViewFromPath);
   const [products, setProducts] = useState([]);
+  const [cart, setCart] = useState([]);
   const [deployInfo, setDeployInfo] = useState(null);
-  const [lastRequestInfo, setLastRequestInfo] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [statusLoading, setStatusLoading] = useState(false);
+  const [showCart, setShowCart] = useState(false);
 
   useEffect(() => {
     fetchProducts();
+    fetchCart();
   }, []);
 
+  // Live polling every 1 second
   useEffect(() => {
-    getDeploymentInfo();
+    const fetchInfo = () => {
+      fetch(`${BACKEND_URL}/info`)
+        .then((res) => res.json())
+        .then((data) => setDeployInfo(data))
+        .catch((err) => console.error(err));
+    };
+    fetchInfo();
+    const intv = setInterval(fetchInfo, 1000);
+    return () => clearInterval(intv);
   }, []);
 
   useEffect(() => {
     const syncRoute = () => setView(getViewFromPath());
-
     window.addEventListener("popstate", syncRoute);
     return () => window.removeEventListener("popstate", syncRoute);
   }, []);
@@ -326,330 +412,173 @@ function App() {
       });
   };
 
-  const getDeploymentInfo = () => {
-    setStatusLoading(true);
-    fetch(`${BACKEND_URL}/info`)
+  const fetchCart = () => {
+    fetch(`${BACKEND_URL}/cart`)
       .then((res) => res.json())
-      .then((data) => {
-        setDeployInfo(data);
-        setLastRequestInfo(data);
-        setStatusLoading(false);
-      })
-      .catch((err) => {
-        console.error("Error fetching info:", err);
-        setStatusLoading(false);
-      });
+      .then((data) => setCart(data))
+      .catch((err) => console.error("Error fetching cart data:", err));
   };
 
-  if (view === "landing") {
-    return (
-      <LandingPage
-        onExplore={() => navigateTo("catalog")}
-        onCheckStatus={getDeploymentInfo}
-        deployInfo={deployInfo}
-        lastRequestInfo={lastRequestInfo}
-        loading={statusLoading}
-      />
-    );
-  }
+  const addToCart = (product) => {
+    fetch(`${BACKEND_URL}/cart`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(product),
+    })
+      .then((res) => res.json())
+      .then((data) => setCart(data))
+      .catch((err) => console.error("Error adding to cart:", err));
+  };
+
+  const handleCheckout = (paymentMethod) => {
+    fetch(`${BACKEND_URL}/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payment_method: paymentMethod }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          alert("Checkout successful! Order ID: " + data.orderId);
+          setCart([]);
+          setShowCart(false);
+        }
+      })
+      .catch((err) => alert("Checkout failed"));
+  };
 
   return (
-    <div className="layout">
-      {/* Premium Header */}
-      <header>
-        <div
-          className="brand"
-          onClick={() => navigateTo("landing")}
-          style={{ cursor: "pointer" }}
-        >
-          <svg
-            width="32"
-            height="32"
-            viewBox="0 0 32 32"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <rect width="32" height="32" rx="8" fill="#2563eb" />
-            <path
-              d="M8 16H24M16 8V24"
-              stroke="white"
-              strokeWidth="3"
-              strokeLinecap="round"
-            />
-          </svg>
-          Tech Store
-        </div>
-
-        <div className="search-bar">
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-          <input type="text" placeholder="Search products..." />
-        </div>
-
-        <nav className="nav-links">
-          <span className="nav-link">Best Sellers</span>
-          <span className="nav-link">New Arrivals</span>
-          <div
-            className="nav-link"
-            style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-            onClick={getDeploymentInfo}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-              <line x1="8" y1="21" x2="16" y2="21"></line>
-              <line x1="12" y1="17" x2="12" y2="21"></line>
-            </svg>
-            Refresh trace
-          </div>
-        </nav>
-      </header>
-
-      {/* Categories Bar */}
-      <div className="categories">
-        <span className="category-item">Monitors</span>
-        <span className="category-item">Keyboards</span>
-        <span className="category-item">Components</span>
-        <span className="category-item">Storage</span>
-        <span className="category-item" style={{ color: "#2563eb" }}>
-          Summer Deals
-        </span>
-      </div>
-
-      <main className="container">
-        {/* Improved Main View Banner */}
-        <div className="hero">
-          <h1>
-            Upgrade Your Desk. <br /> Elevate Your Performance.
-          </h1>
-          <p>
-            Browse our curated collection of professional tech products. Free
-            shipping on all orders over $99.
-          </p>
-          <div style={{ display: "flex", gap: "1rem" }}>
-            <button
-              className="cta-button"
-              style={{
-                padding: "0.75rem 1.5rem",
-                borderRadius: "8px",
-                fontSize: "0.95rem",
-              }}
-            >
-              Shop Now
-            </button>
-            <button
-              className="cta-button"
-              style={{
-                padding: "0.75rem 1.5rem",
-                borderRadius: "8px",
-                fontSize: "0.95rem",
-                background: "transparent",
-                border: "1px solid var(--border)",
-                boxShadow: "none",
-                color: "var(--text-main)",
-              }}
-            >
-              Learn More
-            </button>
-          </div>
-        </div>
-
-        {/* Product Grid */}
-        <div className="product-grid">
-          {products.map((product) => (
-            <div key={product.id || product.sku} className="product-card">
-              <div className="image-wrapper">
-                <img src={product.image} alt={product.name} />
-              </div>
-              <span className="product-tag">{product.category}</span>
-              <h3 className="product-name">{product.name}</h3>
-              <p className="product-desc">{product.description}</p>
-              <div className="price-row">
-                <span className="price">${product.price}</span>
-                <button className="add-btn">
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="white"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          ))}
-          {products.length === 0 && !loading && (
+    <>
+      <VersionBanner version={deployInfo?.version} />
+      {view === "landing" ? (
+        <LandingPage onExplore={() => navigateTo("catalog")} />
+      ) : (
+        <div className="layout">
+          <header>
             <div
-              style={{
-                textAlign: "center",
-                gridColumn: "1 / -1",
-                padding: "6rem 2rem",
-                background: "var(--card-bg)",
-                borderRadius: "32px",
-                border: "1px solid var(--border)",
-              }}
+              className="brand"
+              onClick={() => navigateTo("landing")}
+              style={{ cursor: "pointer" }}
             >
-              <h2 style={{ color: "white", marginBottom: "1rem" }}>
-                No signals detected.
-              </h2>
-              <p style={{ color: "var(--text-muted)", marginBottom: "2rem" }}>
-                Establish a database connection to restore the catalog link.
-              </p>
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 32 32"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect width="32" height="32" rx="8" fill="#2563eb" />
+                <path
+                  d="M8 16H24M16 8V24"
+                  stroke="white"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+              </svg>
+              Tech Store
+            </div>
+            <div className="search-bar">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input type="text" placeholder="Search products..." />
+            </div>
+            <nav className="nav-links">
               <button
-                className="cta-button"
-                onClick={fetchProducts}
+                className="nav-link"
+                onClick={() => setShowCart(true)}
                 style={{
-                  padding: "0.75rem 2rem",
-                  fontSize: "0.95rem",
+                  background: "transparent",
+                  border: "none",
+                  color: "white",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
                 }}
               >
-                Reconnect
+                Cart ({cart.length})
               </button>
+            </nav>
+          </header>
+
+          <div className="categories">
+            <span className="category-item">Monitors</span>
+            <span className="category-item">Keyboards</span>
+            <span className="category-item">Components</span>
+            <span className="category-item">Storage</span>
+            <span className="category-item" style={{ color: "#2563eb" }}>
+              Summer Deals
+            </span>
+          </div>
+
+          <main className="container">
+            <div className="hero">
+              <h1>
+                Upgrade Your Desk. <br /> Elevate Your Performance.
+              </h1>
+              <p>
+                Browse our curated collection of professional tech products.
+                Free shipping on all orders over $99.
+              </p>
             </div>
+
+            <div className="product-grid">
+              {products.map((product) => (
+                <div key={product.id || product.sku} className="product-card">
+                  <div className="image-wrapper">
+                    <img src={product.image} alt={product.name} />
+                  </div>
+                  <span className="product-tag">{product.category}</span>
+                  <h3 className="product-name">{product.name}</h3>
+                  <p className="product-desc">{product.description}</p>
+                  <div className="price-row">
+                    <span className="price">${product.price}</span>
+                    <button
+                      className="add-btn"
+                      onClick={() => addToCart(product)}
+                    >
+                      <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="white"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </main>
+
+          {showCart && (
+            <CartModal
+              cart={cart}
+              onClose={() => setShowCart(false)}
+              onCheckout={handleCheckout}
+            />
           )}
         </div>
-      </main>
-
-      {/* Real-time Cluster Monitor Sticker */}
-      {lastRequestInfo && (
-        <div className="monitor-sticker">
-          <div
-            className="monitor-header"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem",
-              borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-              paddingBottom: "0.5rem",
-              marginBottom: "0.5rem",
-            }}
-          >
-            <div
-              className="node-chip"
-              style={{
-                background: "var(--primary)",
-                padding: "2px 8px",
-                borderRadius: "6px",
-                fontSize: "0.7rem",
-                fontWeight: "700",
-              }}
-            >
-              CLUSTER MONITOR
-            </div>
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                backgroundColor: "#10b981",
-                boxShadow: "0 0 10px #10b981",
-              }}
-            ></div>
-          </div>
-          <div
-            className="status-row"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: "0.8rem",
-            }}
-          >
-            <span
-              className="status-label"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Node:
-            </span>
-            <span
-              className="status-value"
-              style={{
-                fontFamily: "monospace",
-                fontWeight: "600",
-                color: "var(--text-main)",
-              }}
-            >
-              {lastRequestInfo.nodeName}
-            </span>
-          </div>
-          <div
-            className="status-row"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: "0.8rem",
-            }}
-          >
-            <span
-              className="status-label"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Pod:
-            </span>
-            <span
-              className="status-value"
-              style={{
-                fontFamily: "monospace",
-                fontWeight: "600",
-                fontSize: "0.7rem",
-                color: "var(--text-main)",
-              }}
-            >
-              {lastRequestInfo.podName}
-            </span>
-          </div>
-          <div
-            className="status-row"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: "0.8rem",
-            }}
-          >
-            <span
-              className="status-label"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Pod IP:
-            </span>
-            <span
-              className="status-value"
-              style={{
-                fontFamily: "monospace",
-                fontWeight: "600",
-                color: "var(--text-main)",
-              }}
-            >
-              {lastRequestInfo.podIp}
-            </span>
-          </div>
-        </div>
       )}
-    </div>
+      <StatusWidget info={deployInfo} />
+    </>
   );
 }
 

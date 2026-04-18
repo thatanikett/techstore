@@ -4,32 +4,50 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "8080:80"
+      - "80:80"
     depends_on:
       - backend
 
   backend:
     build: ./backend
     ports:
-      - "5000:5000"
+      - "8080:8080"
     environment:
-      - DATABASE_URL=postgres://ecom_user:ecom_pass@postgres:5432/ecom
-      - POD_NAME=docker-backend-pod
-      - NODE_NAME=docker-local-node
-      - POD_IP=127.0.0.1
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/postgres
+      - REDIS_URL=redis://redis:6379
+      - APP_VERSION=V1
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      flyway:
+        condition: service_completed_successfully
 
   postgres:
-    build: ./db
+    image: postgres:15-alpine
     environment:
-      - POSTGRES_USER=ecom_user
-      - POSTGRES_PASSWORD=ecom_pass
-      - POSTGRES_DB=ecom
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
     ports:
       - "5433:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-volumes:
-  postgres-data:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  flyway:
+    image: flyway/flyway:9-alpine
+    command: -url=jdbc:postgresql://postgres:5432/postgres -user=postgres -password=postgres -connectRetries=10 migrate
+    volumes:
+      - ./migrations:/flyway/sql
+    depends_on:
+      postgres:
+        condition: service_healthy
