@@ -2,6 +2,21 @@ import { useState, useEffect } from "react";
 import "./index.css";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "/api";
+const fetchFromBackend = (path, options = {}) =>
+  fetch(`${BACKEND_URL}${path}`, {
+    credentials: "include",
+    ...options,
+  });
+const parseCartResponse = async (response) => {
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Cart request failed");
+  }
+  if (!Array.isArray(data)) {
+    throw new Error("Cart response was not an array");
+  }
+  return data;
+};
 const getViewFromPath = () =>
   window.location.pathname.startsWith("/catalog") ? "catalog" : "landing";
 
@@ -32,6 +47,7 @@ const landingTestimonials = [
   },
 ];
 
+/* ─── Landing Page ─────────────────────────────────────────────────────── */
 function LandingPage({ onExplore }) {
   return (
     <div className="landing-page">
@@ -68,7 +84,6 @@ function LandingPage({ onExplore }) {
           <div className="stage-halo stage-halo-one" />
           <div className="stage-halo stage-halo-two" />
           <div className="stage-halo stage-halo-three" />
-
           <img
             src="/image.png"
             alt="Retro display"
@@ -89,7 +104,6 @@ function LandingPage({ onExplore }) {
             alt="Open desktop chassis"
             className="floating-asset asset-chassis"
           />
-
           <div className="landing-hero-copy landing-hero-copy-centered">
             <h1 className="landing-title">
               Shop the
@@ -108,7 +122,7 @@ function LandingPage({ onExplore }) {
               <div className="catalog-invite">
                 <img
                   src="/cursor.png"
-                  alt="Cursor pointing at open catalog"
+                  alt="Cursor"
                   className="catalog-cursor"
                 />
                 <button className="cta-button" onClick={onExplore}>
@@ -123,8 +137,8 @@ function LandingPage({ onExplore }) {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    <polyline points="12 5 19 12 12 19"></polyline>
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
                   </svg>
                 </button>
               </div>
@@ -133,8 +147,8 @@ function LandingPage({ onExplore }) {
               </a>
             </div>
             <div className="landing-signal-list">
-              {landingSignals.map((signal) => (
-                <span key={signal}>{signal}</span>
+              {landingSignals.map((s) => (
+                <span key={s}>{s}</span>
               ))}
             </div>
           </div>
@@ -182,179 +196,409 @@ function LandingPage({ onExplore }) {
   );
 }
 
+/* ─── Version Banner ───────────────────────────────────────────────────── */
 function VersionBanner({ version }) {
   if (!version) return null;
   const isV1 = version.toLowerCase() === "v1";
-  const bg = isV1 ? "#2563eb" : "#10b981"; // Blue for V1, Green for V2
-
+  const bg = isV1 ? "#2563eb" : "#10b981";
   return (
     <div
       style={{
         backgroundColor: bg,
         color: "white",
-        padding: "8px",
+        padding: "8px 16px",
         textAlign: "center",
-        fontWeight: "bold",
+        fontWeight: "700",
+        fontSize: "0.9rem",
+        letterSpacing: "0.05em",
       }}
     >
-      Running Version: {version}
+      🟢 Running Version: {version}
     </div>
   );
 }
 
+/* ─── Live Status Widget ───────────────────────────────────────────────── */
 function StatusWidget({ info }) {
   if (!info) return null;
+  const isV1 = (info.version || "").toLowerCase() === "v1";
+  const accent = isV1 ? "#2563eb" : "#10b981";
   return (
     <div
       style={{
         position: "fixed",
         bottom: "20px",
         right: "20px",
-        backgroundColor: "rgba(0,0,0,0.8)",
-        border: "1px solid rgba(255,255,255,0.1)",
-        padding: "15px",
-        borderRadius: "8px",
+        background: "rgba(10,10,20,0.92)",
+        border: `1px solid ${accent}44`,
+        padding: "14px 18px",
+        borderRadius: "10px",
         color: "white",
-        zIndex: 9999,
+        zIndex: 8888,
         fontFamily: "monospace",
+        fontSize: "0.8rem",
         display: "flex",
         flexDirection: "column",
-        gap: "8px",
+        gap: "6px",
+        backdropFilter: "blur(8px)",
+        minWidth: "200px",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          marginBottom: "4px",
+        }}
+      >
         <div
           style={{
             width: 8,
             height: 8,
             borderRadius: "50%",
-            backgroundColor: "#10b981",
-            boxShadow: "0 0 10px #10b981",
+            backgroundColor: accent,
+            boxShadow: `0 0 8px ${accent}`,
           }}
         />
-        <span style={{ fontWeight: "bold" }}>Live Traffic Shift Monitor</span>
+        <span
+          style={{
+            fontWeight: "700",
+            fontSize: "0.75rem",
+            textTransform: "uppercase",
+            color: accent,
+          }}
+        >
+          Live Traffic Monitor
+        </span>
       </div>
       <div>
-        <strong>Hostname:</strong> {info.hostname}
+        <span style={{ color: "#888" }}>Hostname:</span> {info.hostname}
       </div>
       <div>
-        <strong>Version:</strong> {info.version}
+        <span style={{ color: "#888" }}>Version: </span>
+        <span style={{ color: accent, fontWeight: "700" }}>{info.version}</span>
       </div>
     </div>
   );
 }
 
-function CartModal({ cart, onClose, onCheckout }) {
+/* ─── Cart Sidebar ─────────────────────────────────────────────────────── */
+function CartSidebar({ cart, onClose, onCheckout, onUpdateQuantity }) {
   const [paymentMethod, setPaymentMethod] = useState("online");
-  const total = cart.reduce((add, item) => add + Number(item.price), 0);
+  const total = cart.reduce(
+    (sum, item) => sum + Number(item.price) * (item.quantity || 1),
+    0,
+  );
+  const count = cart.reduce((sum, item) => sum + (item.quantity || 1), 0);
+
+  // Close on backdrop click
+  const handleBackdropClick = (e) => {
+    if (e.target === e.currentTarget) onClose();
+  };
 
   return (
     <div
+      onClick={handleBackdropClick}
       style={{
         position: "fixed",
         top: 0,
         left: 0,
         width: "100%",
         height: "100%",
-        backgroundColor: "rgba(0,0,0,0.5)",
+        backgroundColor: "rgba(0,0,0,0.6)",
         zIndex: 9999,
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
       }}
     >
       <div
+        onClick={(e) => e.stopPropagation()}
         style={{
-          backgroundColor: "var(--card-bg)",
-          padding: "20px",
-          borderRadius: "12px",
-          width: "90%",
-          maxWidth: "400px",
-          color: "var(--text-main)",
-          border: "1px solid var(--border)",
+          position: "absolute",
+          top: 0,
+          right: 0,
+          width: "100%",
+          maxWidth: "460px",
+          height: "100%",
+          backgroundColor: "#0f1117",
+          borderLeft: "1px solid rgba(255,255,255,0.1)",
+          boxShadow: "-8px 0 32px rgba(0,0,0,0.6)",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
-        <h2>Your Cart</h2>
-        {cart.length === 0 ? (
-          <p>Cart is empty</p>
-        ) : (
-          <div style={{ margin: "20px 0" }}>
-            {cart.map((item, idx) => (
+        {/* Header */}
+        <div
+          style={{
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.1)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: "1.3rem", color: "white" }}>
+            Cart ({count} items)
+          </h2>
+          <button
+            onClick={onClose}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
+              color: "white",
+              cursor: "pointer",
+              width: "32px",
+              height: "32px",
+              borderRadius: "8px",
+              fontSize: "1.2rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Items */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
+          {cart.length === 0 ? (
+            <div
+              style={{ textAlign: "center", color: "#666", marginTop: "60px" }}
+            >
+              <div style={{ fontSize: "3rem", marginBottom: "12px" }}>🛒</div>
+              <p>Your cart is empty</p>
+            </div>
+          ) : (
+            cart.map((item) => (
               <div
-                key={idx}
+                key={item.id}
                 style={{
                   display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: "8px",
+                  gap: "14px",
+                  marginBottom: "16px",
+                  padding: "14px",
+                  background: "rgba(255,255,255,0.04)",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(255,255,255,0.08)",
                 }}
               >
-                <span>{item.name}</span>
-                <span>${item.price}</span>
+                <img
+                  src={item.image}
+                  alt={item.name}
+                  style={{
+                    width: "72px",
+                    height: "72px",
+                    objectFit: "cover",
+                    borderRadius: "8px",
+                    flexShrink: 0,
+                  }}
+                  onError={(e) => {
+                    e.target.style.background = "#1e2130";
+                    e.target.src = "";
+                  }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontWeight: "600",
+                      color: "white",
+                      marginBottom: "4px",
+                      fontSize: "0.95rem",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {item.name}
+                  </div>
+                  <div
+                    style={{
+                      color: "#2563eb",
+                      fontWeight: "700",
+                      marginBottom: "10px",
+                    }}
+                  >
+                    ${Number(item.price).toFixed(2)}
+                  </div>
+                  {/* Quantity Controls */}
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: "0" }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateQuantity(item.id, item.quantity || 1, "decrease")
+                      }
+                      style={{
+                        width: "30px",
+                        height: "30px",
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        background: "rgba(255,255,255,0.08)",
+                        color: "white",
+                        cursor: "pointer",
+                        borderRadius: "6px 0 0 6px",
+                        fontSize: "1rem",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      −
+                    </button>
+                    <div
+                      style={{
+                        width: "40px",
+                        height: "30px",
+                        background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        borderLeft: "none",
+                        borderRight: "none",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "white",
+                        fontWeight: "700",
+                      }}
+                    >
+                      {item.quantity || 1}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateQuantity(item.id, item.quantity || 1, "increase")
+                      }
+                      style={{
+                        width: "30px",
+                        height: "30px",
+                        border: "1px solid rgba(255,255,255,0.15)",
+                        background: "#2563eb",
+                        color: "white",
+                        cursor: "pointer",
+                        borderRadius: "0 6px 6px 0",
+                        fontSize: "1rem",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    color: "white",
+                    fontWeight: "700",
+                    fontSize: "0.95rem",
+                    flexShrink: 0,
+                  }}
+                >
+                  ${(Number(item.price) * (item.quantity || 1)).toFixed(2)}
+                </div>
               </div>
-            ))}
-            <hr style={{ borderColor: "rgba(255,255,255,0.1)" }} />
+            ))
+          )}
+        </div>
+
+        {/* Footer */}
+        {cart.length > 0 && (
+          <div
+            style={{
+              padding: "20px 24px",
+              borderTop: "1px solid rgba(255,255,255,0.1)",
+              background: "#0a0c14",
+            }}
+          >
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                fontWeight: "bold",
-                marginTop: "8px",
+                fontSize: "1.15rem",
+                fontWeight: "700",
+                color: "white",
+                marginBottom: "20px",
               }}
             >
               <span>Total</span>
               <span>${total.toFixed(2)}</span>
             </div>
-          </div>
-        )}
 
-        {cart.length > 0 && (
-          <div style={{ marginBottom: "20px" }}>
-            <label style={{ display: "block", marginBottom: "8px" }}>
-              Payment Method:
-            </label>
-            <div style={{ display: "flex", gap: "16px" }}>
-              <label>
-                <input
-                  type="radio"
-                  value="online"
-                  checked={paymentMethod === "online"}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                />{" "}
-                Online
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  value="cod"
-                  checked={paymentMethod === "cod"}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                />{" "}
-                Cash on Delivery (COD)
-              </label>
+            <div style={{ marginBottom: "20px" }}>
+              <p
+                style={{
+                  color: "#888",
+                  fontSize: "0.8rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  marginBottom: "10px",
+                }}
+              >
+                Payment Method
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                }}
+              >
+                {[
+                  { value: "online", label: "💳 Credit / Debit Card" },
+                  { value: "cod", label: "💵 Cash on Delivery (COD)" },
+                ].map(({ value, label }) => (
+                  <label
+                    key={value}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      cursor: "pointer",
+                      padding: "10px 14px",
+                      borderRadius: "8px",
+                      color: "white",
+                      background:
+                        paymentMethod === value
+                          ? "rgba(37,99,235,0.2)"
+                          : "rgba(255,255,255,0.04)",
+                      border:
+                        paymentMethod === value
+                          ? "1px solid #2563eb"
+                          : "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      value={value}
+                      checked={paymentMethod === value}
+                      onChange={() => setPaymentMethod(value)}
+                      style={{ accentColor: "#2563eb" }}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
 
-        <div
-          style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}
-        >
-          <button className="secondary-cta-button" onClick={onClose}>
-            Close
-          </button>
-          {cart.length > 0 && (
             <button
               className="cta-button"
+              style={{
+                width: "100%",
+                padding: "14px",
+                fontSize: "1rem",
+                borderRadius: "10px",
+              }}
               onClick={() => onCheckout(paymentMethod)}
             >
-              Checkout
+              Complete Checkout →
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
+/* ─── App ──────────────────────────────────────────────────────────────── */
 function App() {
   const [view, setView] = useState(getViewFromPath);
   const [products, setProducts] = useState([]);
@@ -368,105 +612,115 @@ function App() {
     fetchCart();
   }, []);
 
-  // Live polling every 1 second
+  // Live /api/info polling every 1 s
   useEffect(() => {
-    const fetchInfo = () => {
-      fetch(`${BACKEND_URL}/info`)
-        .then((res) => res.json())
-        .then((data) => setDeployInfo(data))
-        .catch((err) => console.error(err));
-    };
-    fetchInfo();
-    const intv = setInterval(fetchInfo, 1000);
-    return () => clearInterval(intv);
+    const poll = () =>
+      fetchFromBackend("/info")
+        .then((r) => r.json())
+        .then(setDeployInfo)
+        .catch(() => {});
+    poll();
+    const id = setInterval(poll, 1000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
-    const syncRoute = () => setView(getViewFromPath());
-    window.addEventListener("popstate", syncRoute);
-    return () => window.removeEventListener("popstate", syncRoute);
+    const sync = () => setView(getViewFromPath());
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
   }, []);
 
-  const navigateTo = (nextView) => {
-    const path = nextView === "catalog" ? "/catalog" : "/";
-    if (window.location.pathname !== path) {
+  const navigateTo = (v) => {
+    const path = v === "catalog" ? "/catalog" : "/";
+    if (window.location.pathname !== path)
       window.history.pushState({}, "", path);
-    }
-    setView(nextView);
+    setView(v);
   };
 
   const fetchProducts = () => {
     setLoading(true);
-    fetch(`${BACKEND_URL}/products`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Backend not available");
-        return res.json();
+    fetchFromBackend("/products")
+      .then((r) => {
+        if (!r.ok) throw new Error("Backend unavailable");
+        return r.json();
       })
-      .then((data) => {
-        setProducts(data);
+      .then((d) => {
+        setProducts(d);
         setLoading(false);
       })
-      .catch((err) => {
-        console.error("Error fetching products:", err);
-        setLoading(false);
-      });
+      .catch(() => setLoading(false));
   };
 
-  const fetchCart = () => {
-    fetch(`${BACKEND_URL}/cart`)
-      .then((res) => res.json())
-      .then((data) => setCart(data))
-      .catch((err) => console.error("Error fetching cart data:", err));
-  };
+  const fetchCart = () =>
+    fetchFromBackend("/cart")
+      .then(parseCartResponse)
+      .then(setCart)
+      .catch((e) => console.error("fetchCart error", e));
 
-  const addToCart = (product) => {
-    fetch(`${BACKEND_URL}/cart`, {
+  const addToCart = (product) =>
+    fetchFromBackend("/cart", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(product),
     })
-      .then((res) => res.json())
-      .then((data) => setCart(data))
-      .catch((err) => console.error("Error adding to cart:", err));
+      .then(parseCartResponse)
+      .then(setCart)
+      .catch((e) => console.error("addToCart error", e));
+
+  const updateQuantity = (productId, currentQuantity, action) => {
+    const endpoint =
+      action === "increase"
+        ? `/cart/${productId}/increment`
+        : `/cart/${productId}/decrement`;
+
+    return fetchFromBackend(endpoint, {
+      method: "POST",
+    })
+      .then(parseCartResponse)
+      .then(setCart)
+      .catch((e) => {
+        console.error("updateQuantity error", e);
+        fetchCart();
+      });
   };
 
-  const handleCheckout = (paymentMethod) => {
-    fetch(`${BACKEND_URL}/orders`, {
+  const handleCheckout = (paymentMethod) =>
+    fetchFromBackend("/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ payment_method: paymentMethod }),
     })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          alert("Checkout successful! Order ID: " + data.orderId);
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) {
+          alert(`✅ Order placed! ID: ${d.orderId}`);
           setCart([]);
           setShowCart(false);
+        } else {
+          alert("Checkout failed: " + (d.error || "unknown error"));
         }
       })
-      .catch((err) => alert("Checkout failed"));
-  };
+      .catch(() => alert("Checkout failed — backend error"));
+
+  const safeCart = Array.isArray(cart) ? cart : [];
+  const cartCount = safeCart.reduce((s, i) => s + (i.quantity || 1), 0);
 
   return (
     <>
       <VersionBanner version={deployInfo?.version} />
+
       {view === "landing" ? (
         <LandingPage onExplore={() => navigateTo("catalog")} />
       ) : (
         <div className="layout">
+          {/* Header */}
           <header>
             <div
               className="brand"
               onClick={() => navigateTo("landing")}
               style={{ cursor: "pointer" }}
             >
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 32 32"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
                 <rect width="32" height="32" rx="8" fill="#2563eb" />
                 <path
                   d="M8 16H24M16 8V24"
@@ -477,6 +731,7 @@ function App() {
               </svg>
               Tech Store
             </div>
+
             <div className="search-bar">
               <svg
                 width="20"
@@ -488,13 +743,15 @@ function App() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
               <input type="text" placeholder="Search products..." />
             </div>
+
             <nav className="nav-links">
               <button
+                id="cart-btn"
                 className="nav-link"
                 onClick={() => setShowCart(true)}
                 style={{
@@ -504,28 +761,49 @@ function App() {
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  gap: "8px",
+                  gap: "6px",
+                  fontWeight: "600",
                 }}
               >
-                Cart ({cart.length})
+                🛒 Cart
+                {cartCount > 0 && (
+                  <span
+                    style={{
+                      background: "#2563eb",
+                      color: "white",
+                      borderRadius: "999px",
+                      padding: "2px 8px",
+                      fontSize: "0.75rem",
+                    }}
+                  >
+                    {cartCount}
+                  </span>
+                )}
               </button>
             </nav>
           </header>
 
           <div className="categories">
-            <span className="category-item">Monitors</span>
-            <span className="category-item">Keyboards</span>
-            <span className="category-item">Components</span>
-            <span className="category-item">Storage</span>
-            <span className="category-item" style={{ color: "#2563eb" }}>
-              Summer Deals
-            </span>
+            {[
+              "Monitors",
+              "Keyboards",
+              "Components",
+              "Accessories",
+              "Audio",
+              "Case",
+            ].map((c) => (
+              <span key={c} className="category-item">
+                {c}
+              </span>
+            ))}
           </div>
 
           <main className="container">
             <div className="hero">
               <h1>
-                Upgrade Your Desk. <br /> Elevate Your Performance.
+                Upgrade Your Desk.
+                <br />
+                Elevate Your Performance.
               </h1>
               <p>
                 Browse our curated collection of professional tech products.
@@ -533,20 +811,37 @@ function App() {
               </p>
             </div>
 
+            {loading && (
+              <p style={{ textAlign: "center", color: "#888" }}>
+                Loading products…
+              </p>
+            )}
+
             <div className="product-grid">
               {products.map((product) => (
                 <div key={product.id || product.sku} className="product-card">
                   <div className="image-wrapper">
-                    <img src={product.image} alt={product.name} />
+                    <img
+                      src={product.image}
+                      alt={product.name}
+                      onError={(e) => {
+                        e.target.src =
+                          "https://placehold.co/400x300/1e2130/555?text=Tech+Store";
+                      }}
+                    />
                   </div>
                   <span className="product-tag">{product.category}</span>
                   <h3 className="product-name">{product.name}</h3>
                   <p className="product-desc">{product.description}</p>
                   <div className="price-row">
-                    <span className="price">${product.price}</span>
+                    <span className="price">
+                      ${Number(product.price).toFixed(2)}
+                    </span>
                     <button
+                      id={`add-to-cart-${product.id}`}
                       className="add-btn"
                       onClick={() => addToCart(product)}
+                      title="Add to cart"
                     >
                       <svg
                         width="20"
@@ -558,8 +853,8 @@ function App() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       >
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
                     </button>
                   </div>
@@ -569,14 +864,16 @@ function App() {
           </main>
 
           {showCart && (
-            <CartModal
-              cart={cart}
+            <CartSidebar
+              cart={safeCart}
               onClose={() => setShowCart(false)}
               onCheckout={handleCheckout}
+              onUpdateQuantity={updateQuantity}
             />
           )}
         </div>
       )}
+
       <StatusWidget info={deployInfo} />
     </>
   );
