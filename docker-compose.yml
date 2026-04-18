@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgres://ecom_user:ecom_pass@postgres:5432/ecom
+      - POD_NAME=docker-backend-pod
+      - NODE_NAME=docker-local-node
+      - POD_IP=127.0.0.1
+    depends_on:
+      - postgres
+
+  postgres:
+    build: ./db
+    environment:
+      - POSTGRES_USER=ecom_user
+      - POSTGRES_PASSWORD=ecom_pass
+      - POSTGRES_DB=ecom
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
