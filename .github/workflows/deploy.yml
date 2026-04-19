@@ -1,0 +1,361 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Run AWS deploy steps"
+        required: true
+        default: false
+        type: boolean
+      backend_app_version:
+        description: "Override backend APP_VERSION"
+        required: false
+        default: ""
+        type: string
+      frontend_image_tag:
+        description: "Optional frontend image tag override"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Check backend syntax
+        working-directory: backend
+        run: node --check index.js
+
+      - name: Build frontend assets
+        working-directory: frontend
+        run: npm run build
+
+      - name: Build backend image
+        run: docker build -t techstore-backend:${{ github.sha }} -f backend/Dockerfile backend
+
+      - name: Build frontend image
+        run: docker build -t techstore-frontend:${{ github.sha }} -f frontend/Dockerfile frontend
+
+  deploy-backend:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.run_deploy == 'true'
+    env:
+      BACKEND_ECR_REPOSITORY: ${{ vars.BACKEND_ECR_REPOSITORY }}
+      BACKEND_ECS_SERVICE: ${{ vars.BACKEND_ECS_SERVICE }}
+      BACKEND_ECS_CONTAINER_NAME: ${{ vars.BACKEND_ECS_CONTAINER_NAME }}
+      BACKEND_ECS_CONTAINER_PORT: ${{ vars.BACKEND_ECS_CONTAINER_PORT }}
+      BACKEND_ECS_TASK_FAMILY: ${{ vars.BACKEND_ECS_TASK_FAMILY }}
+      BACKEND_ECS_TASK_EXECUTION_ROLE_ARN: ${{ vars.BACKEND_ECS_TASK_EXECUTION_ROLE_ARN }}
+      BACKEND_ECS_TASK_ROLE_ARN: ${{ vars.BACKEND_ECS_TASK_ROLE_ARN }}
+      BACKEND_ECS_CPU: ${{ vars.BACKEND_ECS_CPU }}
+      BACKEND_ECS_MEMORY: ${{ vars.BACKEND_ECS_MEMORY }}
+      BACKEND_ECS_LOG_GROUP: ${{ vars.BACKEND_ECS_LOG_GROUP }}
+      DATABASE_URL_SECRET_ARN: ${{ vars.DATABASE_URL_SECRET_ARN }}
+      REDIS_URL_SECRET_ARN: ${{ vars.REDIS_URL_SECRET_ARN }}
+      SESSION_SECRET_ARN: ${{ vars.SESSION_SECRET_ARN }}
+      BACKEND_CODEDEPLOY_APP_NAME: ${{ vars.BACKEND_CODEDEPLOY_APP_NAME }}
+      BACKEND_CODEDEPLOY_DEPLOYMENT_GROUP: ${{ vars.BACKEND_CODEDEPLOY_DEPLOYMENT_GROUP }}
+      BACKEND_APP_VERSION_OVERRIDE: ${{ github.event.inputs.backend_app_version || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Validate backend deployment configuration
+        run: |
+          test -n "${AWS_REGION}"
+          test -n "${ECS_CLUSTER}"
+          test -n "${BACKEND_ECR_REPOSITORY}"
+          test -n "${BACKEND_ECS_SERVICE}"
+          test -n "${BACKEND_ECS_CONTAINER_NAME}"
+          test -n "${BACKEND_ECS_CONTAINER_PORT}"
+          test -n "${BACKEND_ECS_TASK_FAMILY}"
+          test -n "${BACKEND_ECS_TASK_EXECUTION_ROLE_ARN}"
+          test -n "${BACKEND_ECS_TASK_ROLE_ARN}"
+          test -n "${BACKEND_ECS_CPU}"
+          test -n "${BACKEND_ECS_MEMORY}"
+          test -n "${BACKEND_ECS_LOG_GROUP}"
+          test -n "${DATABASE_URL_SECRET_ARN}"
+          test -n "${REDIS_URL_SECRET_ARN}"
+          test -n "${SESSION_SECRET_ARN}"
+          test -n "${BACKEND_CODEDEPLOY_APP_NAME}"
+          test -n "${BACKEND_CODEDEPLOY_DEPLOYMENT_GROUP}"
+          test -n "${{ secrets.FLYWAY_URL }}"
+          test -n "${{ secrets.FLYWAY_USER }}"
+          test -n "${{ secrets.FLYWAY_PASSWORD }}"
+
+      - name: Run database migrations
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/migrations:/flyway/sql" \
+            flyway/flyway:10-alpine \
+            -url="${{ secrets.FLYWAY_URL }}" \
+            -user="${{ secrets.FLYWAY_USER }}" \
+            -password="${{ secrets.FLYWAY_PASSWORD }}" \
+            -connectRetries=10 \
+            migrate
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set backend image metadata
+        id: backend-meta
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${BACKEND_ECR_REPOSITORY}:${GITHUB_SHA}"
+          APP_VERSION="${BACKEND_APP_VERSION_OVERRIDE}"
+          if [ -z "${APP_VERSION}" ]; then
+            APP_VERSION="${GITHUB_SHA::7}"
+          fi
+          echo "image_uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+          echo "app_version=${APP_VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push backend image
+        env:
+          IMAGE_URI: ${{ steps.backend-meta.outputs.image_uri }}
+        run: |
+          docker build -t "${IMAGE_URI}" -f backend/Dockerfile backend
+          docker push "${IMAGE_URI}"
+
+      - name: Render backend task definition
+        env:
+          IMAGE_URI: ${{ steps.backend-meta.outputs.image_uri }}
+          APP_VERSION: ${{ steps.backend-meta.outputs.app_version }}
+        run: |
+          cat > task-definition.backend.rendered.json <<EOF
+          {
+            "family": "${BACKEND_ECS_TASK_FAMILY}",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "${BACKEND_ECS_CPU}",
+            "memory": "${BACKEND_ECS_MEMORY}",
+            "executionRoleArn": "${BACKEND_ECS_TASK_EXECUTION_ROLE_ARN}",
+            "taskRoleArn": "${BACKEND_ECS_TASK_ROLE_ARN}",
+            "containerDefinitions": [
+              {
+                "name": "${BACKEND_ECS_CONTAINER_NAME}",
+                "image": "${IMAGE_URI}",
+                "essential": true,
+                "portMappings": [
+                  {
+                    "containerPort": ${BACKEND_ECS_CONTAINER_PORT},
+                    "protocol": "tcp"
+                  }
+                ],
+                "environment": [
+                  { "name": "PORT", "value": "8080" },
+                  { "name": "APP_VERSION", "value": "${APP_VERSION}" },
+                  { "name": "SESSION_COOKIE_SECURE", "value": "true" },
+                  { "name": "PG_SSL_MODE", "value": "require" },
+                  { "name": "REDIS_TLS_ENABLED", "value": "true" }
+                ],
+                "secrets": [
+                  { "name": "DATABASE_URL", "valueFrom": "${DATABASE_URL_SECRET_ARN}" },
+                  { "name": "REDIS_URL", "valueFrom": "${REDIS_URL_SECRET_ARN}" },
+                  { "name": "SESSION_SECRET", "valueFrom": "${SESSION_SECRET_ARN}" }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "${BACKEND_ECS_LOG_GROUP}",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+
+      - name: Render backend AppSpec
+        run: |
+          cat > appspec.backend.rendered.yml <<EOF
+          version: 0.0
+          Resources:
+            - TargetService:
+                Type: AWS::ECS::Service
+                Properties:
+                  TaskDefinition: "<TASK_DEFINITION>"
+                  LoadBalancerInfo:
+                    ContainerName: "${BACKEND_ECS_CONTAINER_NAME}"
+                    ContainerPort: ${BACKEND_ECS_CONTAINER_PORT}
+          EOF
+
+      - name: Deploy backend to ECS with CodeDeploy
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: task-definition.backend.rendered.json
+          service: ${{ env.BACKEND_ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          codedeploy-appspec: appspec.backend.rendered.yml
+          codedeploy-application: ${{ env.BACKEND_CODEDEPLOY_APP_NAME }}
+          codedeploy-deployment-group: ${{ env.BACKEND_CODEDEPLOY_DEPLOYMENT_GROUP }}
+          wait-for-service-stability: true
+
+  deploy-frontend:
+    needs:
+      - validate
+      - deploy-backend
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.run_deploy == 'true'
+    env:
+      FRONTEND_ECR_REPOSITORY: ${{ vars.FRONTEND_ECR_REPOSITORY }}
+      FRONTEND_ECS_SERVICE: ${{ vars.FRONTEND_ECS_SERVICE }}
+      FRONTEND_ECS_CONTAINER_NAME: ${{ vars.FRONTEND_ECS_CONTAINER_NAME }}
+      FRONTEND_ECS_CONTAINER_PORT: ${{ vars.FRONTEND_ECS_CONTAINER_PORT }}
+      FRONTEND_ECS_TASK_FAMILY: ${{ vars.FRONTEND_ECS_TASK_FAMILY }}
+      FRONTEND_ECS_TASK_EXECUTION_ROLE_ARN: ${{ vars.FRONTEND_ECS_TASK_EXECUTION_ROLE_ARN }}
+      FRONTEND_ECS_TASK_ROLE_ARN: ${{ vars.FRONTEND_ECS_TASK_ROLE_ARN }}
+      FRONTEND_ECS_CPU: ${{ vars.FRONTEND_ECS_CPU }}
+      FRONTEND_ECS_MEMORY: ${{ vars.FRONTEND_ECS_MEMORY }}
+      FRONTEND_ECS_LOG_GROUP: ${{ vars.FRONTEND_ECS_LOG_GROUP }}
+      FRONTEND_CODEDEPLOY_APP_NAME: ${{ vars.FRONTEND_CODEDEPLOY_APP_NAME }}
+      FRONTEND_CODEDEPLOY_DEPLOYMENT_GROUP: ${{ vars.FRONTEND_CODEDEPLOY_DEPLOYMENT_GROUP }}
+      FRONTEND_IMAGE_TAG_OVERRIDE: ${{ github.event.inputs.frontend_image_tag || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Validate frontend deployment configuration
+        run: |
+          test -n "${AWS_REGION}"
+          test -n "${ECS_CLUSTER}"
+          test -n "${FRONTEND_ECR_REPOSITORY}"
+          test -n "${FRONTEND_ECS_SERVICE}"
+          test -n "${FRONTEND_ECS_CONTAINER_NAME}"
+          test -n "${FRONTEND_ECS_CONTAINER_PORT}"
+          test -n "${FRONTEND_ECS_TASK_FAMILY}"
+          test -n "${FRONTEND_ECS_TASK_EXECUTION_ROLE_ARN}"
+          test -n "${FRONTEND_ECS_TASK_ROLE_ARN}"
+          test -n "${FRONTEND_ECS_CPU}"
+          test -n "${FRONTEND_ECS_MEMORY}"
+          test -n "${FRONTEND_ECS_LOG_GROUP}"
+          test -n "${FRONTEND_CODEDEPLOY_APP_NAME}"
+          test -n "${FRONTEND_CODEDEPLOY_DEPLOYMENT_GROUP}"
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set frontend image metadata
+        id: frontend-meta
+        run: |
+          IMAGE_TAG="${FRONTEND_IMAGE_TAG_OVERRIDE}"
+          if [ -z "${IMAGE_TAG}" ]; then
+            IMAGE_TAG="${GITHUB_SHA}"
+          fi
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${FRONTEND_ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "image_uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push frontend image
+        env:
+          IMAGE_URI: ${{ steps.frontend-meta.outputs.image_uri }}
+        run: |
+          docker build -t "${IMAGE_URI}" -f frontend/Dockerfile frontend
+          docker push "${IMAGE_URI}"
+
+      - name: Render frontend task definition
+        env:
+          IMAGE_URI: ${{ steps.frontend-meta.outputs.image_uri }}
+        run: |
+          cat > task-definition.frontend.rendered.json <<EOF
+          {
+            "family": "${FRONTEND_ECS_TASK_FAMILY}",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "${FRONTEND_ECS_CPU}",
+            "memory": "${FRONTEND_ECS_MEMORY}",
+            "executionRoleArn": "${FRONTEND_ECS_TASK_EXECUTION_ROLE_ARN}",
+            "taskRoleArn": "${FRONTEND_ECS_TASK_ROLE_ARN}",
+            "containerDefinitions": [
+              {
+                "name": "${FRONTEND_ECS_CONTAINER_NAME}",
+                "image": "${IMAGE_URI}",
+                "essential": true,
+                "portMappings": [
+                  {
+                    "containerPort": ${FRONTEND_ECS_CONTAINER_PORT},
+                    "protocol": "tcp"
+                  }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "${FRONTEND_ECS_LOG_GROUP}",
+                    "awslogs-region": "${AWS_REGION}",
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+
+      - name: Render frontend AppSpec
+        run: |
+          cat > appspec.frontend.rendered.yml <<EOF
+          version: 0.0
+          Resources:
+            - TargetService:
+                Type: AWS::ECS::Service
+                Properties:
+                  TaskDefinition: "<TASK_DEFINITION>"
+                  LoadBalancerInfo:
+                    ContainerName: "${FRONTEND_ECS_CONTAINER_NAME}"
+                    ContainerPort: ${FRONTEND_ECS_CONTAINER_PORT}
+          EOF
+
+      - name: Deploy frontend to ECS with CodeDeploy
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: task-definition.frontend.rendered.json
+          service: ${{ env.FRONTEND_ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          codedeploy-appspec: appspec.frontend.rendered.yml
+          codedeploy-application: ${{ env.FRONTEND_CODEDEPLOY_APP_NAME }}
+          codedeploy-deployment-group: ${{ env.FRONTEND_CODEDEPLOY_DEPLOYMENT_GROUP }}
+          wait-for-service-stability: true

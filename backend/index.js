@@ -20,24 +20,55 @@ const DATABASE_URL =
   process.env.DATABASE_URL ||
   "postgres://postgres:postgres@localhost:5432/postgres";
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+const SESSION_SECRET = process.env.SESSION_SECRET || "bluegreen-secret";
+const SESSION_COOKIE_SECURE = process.env.SESSION_COOKIE_SECURE === "true";
+const SESSION_COOKIE_SAME_SITE = process.env.SESSION_COOKIE_SAME_SITE || "lax";
+const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || "connect.sid";
+const PG_SSL_MODE = process.env.PG_SSL_MODE || "disable";
+const REDIS_TLS_ENABLED = process.env.REDIS_TLS_ENABLED === "true";
+const REDIS_PING_COMMAND = process.env.REDIS_PING_COMMAND || "PING";
 
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-});
+function buildPgConfig() {
+  const config = {
+    connectionString: DATABASE_URL,
+  };
+
+  if (PG_SSL_MODE !== "disable") {
+    config.ssl = {
+      rejectUnauthorized: PG_SSL_MODE === "verify-full",
+    };
+  }
+
+  return config;
+}
+
+function buildRedisConfig() {
+  const config = { url: REDIS_URL };
+
+  if (REDIS_TLS_ENABLED) {
+    config.socket = { tls: true };
+  }
+
+  return config;
+}
+
+const pool = new Pool(buildPgConfig());
 
 // Redis Client & Session Store
-const redisClient = createClient({ url: REDIS_URL });
+const redisClient = createClient(buildRedisConfig());
 redisClient.on("error", (err) => console.error("Redis Client Error", err));
 
 app.use(
   session({
     store: new RedisStore({ client: redisClient }),
-    secret: "bluegreen-secret",
+    name: SESSION_COOKIE_NAME,
+    secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false, // In production behind a proxy, set to true if using HTTPS
+      secure: SESSION_COOKIE_SECURE,
       httpOnly: true,
+      sameSite: SESSION_COOKIE_SAME_SITE,
       maxAge: 1000 * 60 * 60 * 24, // 1 day
     },
   }),
@@ -94,7 +125,7 @@ async function getDependencyHealth() {
     if (!redisClient.isOpen) {
       await redisClient.connect();
     }
-    await redisClient.ping();
+    await redisClient.sendCommand([REDIS_PING_COMMAND]);
     redis = "connected";
   } catch (err) {
     console.error("Health Redis check failed", err.message);

@@ -1,0 +1,30 @@
+{
+  "family": "REPLACE_ME_FRONTEND_ECS_TASK_FAMILY",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "REPLACE_ME_FRONTEND_EXECUTION_ROLE_ARN",
+  "taskRoleArn": "REPLACE_ME_FRONTEND_TASK_ROLE_ARN",
+  "containerDefinitions": [
+    {
+      "name": "techstore-frontend",
+      "image": "REPLACE_ME_FRONTEND_IMAGE_URI",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "REPLACE_ME_FRONTEND_LOG_GROUP",
+          "awslogs-region": "REPLACE_ME_AWS_REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

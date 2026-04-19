@@ -1,0 +1,42 @@
+{
+  "family": "REPLACE_ME_BACKEND_ECS_TASK_FAMILY",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "REPLACE_ME_BACKEND_EXECUTION_ROLE_ARN",
+  "taskRoleArn": "REPLACE_ME_BACKEND_TASK_ROLE_ARN",
+  "containerDefinitions": [
+    {
+      "name": "techstore-backend",
+      "image": "REPLACE_ME_BACKEND_IMAGE_URI",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "PORT", "value": "8080" },
+        { "name": "APP_VERSION", "value": "REPLACE_ME_BACKEND_APP_VERSION" },
+        { "name": "SESSION_COOKIE_SECURE", "value": "true" },
+        { "name": "PG_SSL_MODE", "value": "require" },
+        { "name": "REDIS_TLS_ENABLED", "value": "true" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "REPLACE_ME_DATABASE_URL_SECRET_ARN" },
+        { "name": "REDIS_URL", "valueFrom": "REPLACE_ME_REDIS_URL_SECRET_ARN" },
+        { "name": "SESSION_SECRET", "valueFrom": "REPLACE_ME_SESSION_SECRET_ARN" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "REPLACE_ME_BACKEND_LOG_GROUP",
+          "awslogs-region": "REPLACE_ME_AWS_REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
