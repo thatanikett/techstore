@@ -221,7 +221,8 @@ function VersionBanner({ version }) {
 /* ─── Live Status Widget ───────────────────────────────────────────────── */
 function StatusWidget({ info }) {
   if (!info) return null;
-  const isV1 = (info.version || "").toLowerCase() === "v1";
+  const version = info.version || "unknown";
+  const isV1 = version.toLowerCase().includes("v1");
   const accent = isV1 ? "#2563eb" : "#10b981";
   return (
     <div
@@ -273,11 +274,21 @@ function StatusWidget({ info }) {
         </span>
       </div>
       <div>
+        <span style={{ color: "#888" }}>Status:</span>{" "}
+        <span style={{ color: accent, fontWeight: "700" }}>{info.status}</span>
+      </div>
+      <div>
         <span style={{ color: "#888" }}>Hostname:</span> {info.hostname}
       </div>
       <div>
         <span style={{ color: "#888" }}>Version: </span>
-        <span style={{ color: accent, fontWeight: "700" }}>{info.version}</span>
+        <span style={{ color: accent, fontWeight: "700" }}>{version}</span>
+      </div>
+      <div>
+        <span style={{ color: "#888" }}>DB:</span> {info.db}
+      </div>
+      <div>
+        <span style={{ color: "#888" }}>Redis:</span> {info.redis}
       </div>
     </div>
   );
@@ -612,10 +623,10 @@ function App() {
     fetchCart();
   }, []);
 
-  // Live /api/info polling every 1 s
+  // Live /api/health polling every 1 s
   useEffect(() => {
     const poll = () =>
-      fetchFromBackend("/info")
+      fetchFromBackend("/health")
         .then((r) => r.json())
         .then(setDeployInfo)
         .catch(() => {});

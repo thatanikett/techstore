@@ -7,6 +7,7 @@ const { RedisStore } = require("connect-redis");
 const { createClient } = require("redis");
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(
   cors({
     origin: true,
@@ -77,6 +78,67 @@ async function ensureRedisConnection() {
     console.log("Redis connected");
   }
 }
+
+async function getDependencyHealth() {
+  let db = "disconnected";
+  let redis = "disconnected";
+
+  try {
+    await pool.query("SELECT 1");
+    db = "connected";
+  } catch (err) {
+    console.error("Health DB check failed", err.message);
+  }
+
+  try {
+    if (!redisClient.isOpen) {
+      await redisClient.connect();
+    }
+    await redisClient.ping();
+    redis = "connected";
+  } catch (err) {
+    console.error("Health Redis check failed", err.message);
+  }
+
+  return { db, redis };
+}
+
+app.get("/health", async (_req, res) => {
+  const { db, redis } = await getDependencyHealth();
+  const status =
+    db === "connected" && redis === "connected" ? "ok" : "degraded";
+
+  res.status(status === "ok" ? 200 : 503).json({
+    status,
+    db,
+    redis,
+    version: process.env.APP_VERSION || "V1",
+    hostname: os.hostname() || "localhost",
+  });
+});
+
+app.get("/test/smoke", async (_req, res) => {
+  try {
+    const version = process.env.APP_VERSION || "V1";
+    const smokeKey = `smoke:${Date.now()}`;
+    await pool.query("SELECT 1");
+    await redisClient.set(smokeKey, version, { EX: 30 });
+    await redisClient.del(smokeKey);
+
+    res.json({
+      status: "ok",
+      test: "smoke",
+      version,
+    });
+  } catch (err) {
+    console.error("Smoke test failed", err);
+    res.status(500).json({
+      status: "failed",
+      test: "smoke",
+      error: err.message,
+    });
+  }
+});
 
 app.get("/products", async (req, res) => {
   try {
@@ -170,7 +232,7 @@ app.delete("/cart", (req, res) => {
 });
 
 // Orders endpoint
-app.post("/orders", async (req, res) => {
+app.post(["/orders", "/api/orders"], async (req, res) => {
   const cart = req.session.cart || [];
   if (cart.length === 0) {
     return res.status(400).json({ error: "Cart is empty" });
